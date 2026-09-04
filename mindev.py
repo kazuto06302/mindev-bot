@@ -2,7 +2,7 @@ import os
 import discord
 from discord.ext import commands
 
-// web server
+# web server
 from threading import Thread
 from flask import Flask
 app = Flask("")
