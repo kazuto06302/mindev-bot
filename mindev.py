@@ -8,6 +8,8 @@ from flask import Flask
 
 app = Flask("")
 
+TEST_GUILD_ID = 1542198719339040830
+
 
 @app.route("/")
 def home():
@@ -30,6 +32,29 @@ bot = commands.Bot(
 )
 
 
+#@bot.event
+#async def on_ready():
+#    print(
+#        f"Logged in as {bot.user.name} "
+#        f"(ID: {bot.user.id})",
+#        flush=True
+#    )
+#
+#    try:
+#        synced = await bot.tree.sync()
+#
+#        print(
+#            f"Synced {len(synced)} command(s)",
+#            flush=True
+#        )
+#
+#    except Exception as e:
+#        print(
+#            f"Failed to sync commands: "
+#            f"{type(e).__name__}: {e}",
+#            flush=True
+#        )
+
 @bot.event
 async def on_ready():
     print(
@@ -38,13 +63,26 @@ async def on_ready():
         flush=True
     )
 
+    guild = discord.Object(id=TEST_GUILD_ID)
+
     try:
-        synced = await bot.tree.sync()
+        bot.tree.copy_global_to(guild=guild)
+
+        synced = await bot.tree.sync(
+            guild=guild
+        )
 
         print(
-            f"Synced {len(synced)} command(s)",
+            f"Synced {len(synced)} command(s) "
+            f"to guild {TEST_GUILD_ID}",
             flush=True
         )
+
+        for command in synced:
+            print(
+                f"  /{command.name}",
+                flush=True
+            )
 
     except Exception as e:
         print(
