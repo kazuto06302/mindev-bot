@@ -34,79 +34,56 @@ bot = commands.Bot(
 # global commandに変更する必要あり
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}", flush=True)
+    print(
+        f"Logged in as {bot.user.name} "
+        f"(ID: {bot.user.id})",
+        flush=True
+    )
+
+    guild = discord.Object(id=TEST_GUILD_ID)
 
     try:
-        # グローバルコマンドを全削除
-        bot.tree.clear_commands(guild=None)
-        await bot.tree.sync()
+        bot.tree.copy_global_to(guild=guild)
 
-        print("Global commands cleared.", flush=True)
+        synced = await bot.tree.sync(
+            guild=guild
+        )
+
+        print(
+            f"Synced {len(synced)} command(s) "
+            f"to guild {TEST_GUILD_ID}",
+            flush=True
+        )
+
+        for command in synced:
+            print(
+                f"  /{command.name}",
+                flush=True
+            )
 
     except Exception as e:
         print(
-            f"Failed to clear global commands: "
+            f"Failed to sync commands: "
             f"{type(e).__name__}: {e}",
             flush=True
         )
 
 async def main():
 
-    extensions = [
-    "cogs.ping",
-    "cogs.permission",
-    "cogs.permission_sync",
-    ]
+    print("Clearing global commands...", flush=True)
 
-    for extension in extensions:
+    bot.tree.clear_commands(guild=None)
 
-        print(
-            f"Loading: {extension}",
-            flush=True
-        )
+    await bot.tree.sync()
 
-        try:
-            await asyncio.wait_for(bot.load_extension(extension),timeout=10)
-
-            print(
-                f"{extension} loaded successfully",
-                flush=True
-            )
-
-        except asyncio.TimeoutError:
-            print(
-                f"ERROR: {extension} load timed out!",
-                flush=True
-            )
-            raise
-
-        except Exception as e:
-            print(
-                f"ERROR loading {extension}: "
-                f"{type(e).__name__}: {e}",
-                flush=True
-            )
-            raise
-
-    print("=== COMMANDS ===", flush=True)
-
-    for command in bot.tree.get_commands():
-
-        print(
-            f"/{command.name}",
-            flush=True
-        )
-
-        if hasattr(command, "commands"):
-            for subcommand in command.commands:
-                print(
-                    f"  /{command.name} {subcommand.name}",
-                    flush=True
-                )
+    print("Global commands cleared.", flush=True)
 
     await bot.start(
         os.getenv("DISCORD_TOKEN")
     )
+
+
+asyncio.run(main())
 
 
 asyncio.run(main())
