@@ -34,28 +34,15 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to sync commands: {e}")
 
-async def load_extensions():
-    for filename in os.listdir("cogs"):
-        if not filename.endswith(".py"):
-            continue
-
-        if filename == "__init__.py":
-            continue
-
-        extension = f"cogs.{filename[:-3]}"
-
-        try:
-            await bot.load_extension(extension)
-            print(f"Loaded: {extension}")
-
-        except Exception:
-            print(f"Failed to load {extension}:")
-            import traceback
-            traceback.print_exc()
-
 async def main():
     async with bot:
-        await load_extensions()
+
+        # Cogsをロード
+        await bot.load_extension("cogs.ping")
+        await bot.load_extension("cogs.permission")
+        await bot.load_extension("cogs.permission_sync")
+
+        print("All cogs loaded.")
         await bot.start(os.getenv("DISCORD_TOKEN"))
 
 asyncio.run(main())
