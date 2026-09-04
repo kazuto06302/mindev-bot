@@ -3,7 +3,6 @@ import discord
 from discord.ext import commands
 import asyncio
 
-# Web server
 from threading import Thread
 from flask import Flask
 
@@ -17,10 +16,7 @@ def home():
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
-    app.run(
-        host="0.0.0.0",
-        port=port
-    )
+    app.run(host="0.0.0.0", port=port)
 
 
 Thread(target=run_web, daemon=True).start()
@@ -38,81 +34,67 @@ bot = commands.Bot(
 async def on_ready():
     print(
         f"Logged in as {bot.user.name} "
-        f"(ID: {bot.user.id})"
+        f"(ID: {bot.user.id})",
+        flush=True
     )
 
     try:
         synced = await bot.tree.sync()
 
         print(
-            f"Synced {len(synced)} command(s)"
+            f"Synced {len(synced)} command(s)",
+            flush=True
         )
-
-        for command in synced:
-            print(
-                f"  /{command.name}"
-            )
 
     except Exception as e:
         print(
             f"Failed to sync commands: "
-            f"{type(e).__name__}: {e}"
+            f"{type(e).__name__}: {e}",
+            flush=True
         )
 
 
 async def main():
 
-    print("=== Loading Cogs ===")
+    print("=== BEFORE LOAD ===", flush=True)
 
-    extensions = [
-        "cogs.ping",
-        "cogs.permission",
-        "cogs.permission_sync",
-    ]
+    print("Loading cogs.ping...", flush=True)
 
-    for extension in extensions:
-
-        print(
-            f"Loading: {extension}"
+    try:
+        await asyncio.wait_for(
+            bot.load_extension("cogs.ping"),
+            timeout=10
         )
 
-        try:
-            await bot.load_extension(
-                extension
-            )
+        print(
+            "cogs.ping loaded successfully",
+            flush=True
+        )
 
-            print(
-                f"Loaded: {extension}"
-            )
+    except asyncio.TimeoutError:
+        print(
+            "ERROR: cogs.ping load timed out!",
+            flush=True
+        )
+        raise
 
-        except Exception as e:
+    except Exception as e:
+        print(
+            f"ERROR loading cogs.ping: "
+            f"{type(e).__name__}: {e}",
+            flush=True
+        )
+        raise
 
-            print(
-                f"FAILED: {extension}"
-            )
-
-            print(
-                f"{type(e).__name__}: {e}"
-            )
-
-            raise
-
-    print("=== Loaded Commands ===")
+    print("=== COMMANDS ===", flush=True)
 
     for command in bot.tree.get_commands():
-
         print(
-            f"/{command.name}"
+            f"/{command.name}",
+            flush=True
         )
 
-        if hasattr(command, "commands"):
-            for subcommand in command.commands:
-                print(
-                    f"  /{command.name} "
-                    f"{subcommand.name}"
-                )
-
-    print("=== Starting Bot ===")
+    print("=== STARTING BOT ===", flush=True)
 
     await bot.start(
         os.getenv("DISCORD_TOKEN")
