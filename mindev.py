@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands
 from threading import Thread
 from flask import Flask
+import asyncio
 
 app = Flask("")
 
