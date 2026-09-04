@@ -56,11 +56,10 @@ async def on_ready():
 
 async def main():
 
-    print("=== BEFORE LOAD ===", flush=True)
-
     extensions = [
-        "cogs.ping",
-        "cogs.permission",
+    "cogs.ping",
+    "cogs.permission",
+    "cogs.permission_sync",
     ]
 
     for extension in extensions:
@@ -71,10 +70,7 @@ async def main():
         )
 
         try:
-            await asyncio.wait_for(
-                bot.load_extension(extension),
-                timeout=10
-            )
+            await asyncio.wait_for(bot.load_extension(extension),timeout=10)
 
             print(
                 f"{extension} loaded successfully",
@@ -111,8 +107,6 @@ async def main():
                     f"  /{command.name} {subcommand.name}",
                     flush=True
                 )
-
-    print("=== STARTING BOT ===", flush=True)
 
     await bot.start(
         os.getenv("DISCORD_TOKEN")
