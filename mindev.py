@@ -1,8 +1,6 @@
 import os
 import discord
 from discord.ext import commands
-import asyncio
-
 from threading import Thread
 from flask import Flask
 
@@ -31,7 +29,7 @@ bot = commands.Bot(
     intents=intents
 )
 
-# global commandに変更する必要あり
+
 @bot.event
 async def on_ready():
     print(
@@ -40,7 +38,10 @@ async def on_ready():
         flush=True
     )
 
-    print("Clearing global commands...", flush=True)
+    print(
+        "Clearing global commands...",
+        flush=True
+    )
 
     bot.tree.clear_commands(guild=None)
 
@@ -54,13 +55,11 @@ async def on_ready():
 
     await bot.close()
 
+
 async def main():
     await bot.start(
         os.getenv("DISCORD_TOKEN")
     )
-
-
-asyncio.run(main())
 
 
 asyncio.run(main())
