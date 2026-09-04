@@ -1,154 +1,401 @@
+import json
+
 import discord
 from discord.ext import commands
 from discord import app_commands
 
-from .permission import PermissionManager
+
+CONFIG_CATEGORY_NAME = "Bot"
+CONFIG_CHANNEL_NAME = "mindev-bot-config"
+CONFIG_MESSAGE_MARKER = "BOT_CONFIG"
 
 
-class PermissionSync(commands.Cog):
+class PermissionManager(commands.Cog):
+    permission = app_commands.Group(
+        name="permission",
+        description="Botの権限を管理します"
+    )
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def is_admin(self, member: discord.Member) -> bool:
+    # ============================================================
+    # Server Owner Check
+    # ============================================================
+
+    async def cog_check(self, interaction: discord.Interaction) -> bool:
         """
-        BotのAdminランクに登録されているロールを
-        ユーザーが持っているか確認する。
+        このCogに属するすべてのコマンドを
+        サーバー所有者限定にする。
         """
 
-        permission_manager = self.bot.get_cog(
-            "PermissionManager"
-        )
-
-        if permission_manager is None:
+        if interaction.guild is None:
             return False
 
-        return await permission_manager.is_admin(member)
+        return interaction.guild.owner_id == interaction.user.id
 
-    @app_commands.command(
-        name="sync_permission",
-        description="別のチャンネルから権限設定をコピーします"
-    )
-    @app_commands.describe(
-        target="権限を変更するチャンネル",
-        source="権限のコピー元となるチャンネル"
-    )
-    async def sync_permission(
+    # ============================================================
+    # Config Channel
+    # ============================================================
+
+    async def get_config_channel(
         self,
-        interaction: discord.Interaction,
-        target: discord.abc.GuildChannel,
-        source: discord.abc.GuildChannel
-    ):
-        # DMでは使用不可
-        if interaction.guild is None:
-            await interaction.response.send_message(
-                "❌ このコマンドはサーバー内でのみ使用できます。",
-                ephemeral=True
-            )
-            return
+        guild: discord.Guild
+    ) -> discord.TextChannel:
 
-        # Memberか確認
-        if not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message(
-                "❌ ユーザー情報を取得できませんでした。",
-                ephemeral=True
-            )
-            return
+        # 既存のbot-configを探す
+        channel = discord.utils.get(
+            guild.text_channels,
+            name=CONFIG_CHANNEL_NAME
+        )
 
-        # Adminランク確認
-        if not await self.is_admin(interaction.user):
-            await interaction.response.send_message(
-                "❌ このコマンドを使用する権限がありません。",
-                ephemeral=True
-            )
-            return
+        if channel is not None:
+            return channel
 
-        # 同じサーバーか確認
-        if target.guild.id != interaction.guild.id:
-            await interaction.response.send_message(
-                "❌ コピー先チャンネルがこのサーバーにありません。",
-                ephemeral=True
-            )
-            return
+        # Botカテゴリを探す
+        category = discord.utils.get(
+            guild.categories,
+            name=CONFIG_CATEGORY_NAME
+        )
 
-        if source.guild.id != interaction.guild.id:
-            await interaction.response.send_message(
-                "❌ コピー元チャンネルがこのサーバーにありません。",
-                ephemeral=True
+        # なければ作成
+        if category is None:
+            category = await guild.create_category(
+                CONFIG_CATEGORY_NAME,
+                reason="Creating Bot configuration category"
             )
-            return
 
-        # 同じチャンネルは禁止
-        if target.id == source.id:
-            await interaction.response.send_message(
-                "❌ コピー元とコピー先を同じチャンネルにはできません。",
-                ephemeral=True
-            )
-            return
-
-        # Bot権限確認
-        bot_member = interaction.guild.me
+        # Bot自身
+        bot_member = guild.me
 
         if bot_member is None:
-            await interaction.response.send_message(
-                "❌ Botのメンバー情報を取得できませんでした。",
-                ephemeral=True
-            )
-            return
+            raise RuntimeError("Bot member could not be found.")
 
-        if not bot_member.guild_permissions.manage_channels:
-            await interaction.response.send_message(
-                "❌ Botに「チャンネルの管理」権限がありません。",
-                ephemeral=True
+        # 権限設定
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(
+                view_channel=False
+            ),
+            bot_member: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_messages=True
             )
-            return
+        }
+
+        # チャンネル作成
+        channel = await guild.create_text_channel(
+            CONFIG_CHANNEL_NAME,
+            category=category,
+            overwrites=overwrites,
+            reason="Creating Bot configuration channel"
+        )
+
+        return channel
+
+    # ============================================================
+    # Config Message
+    # ============================================================
+
+    async def get_config_message(
+        self,
+        channel: discord.TextChannel
+    ) -> discord.Message | None:
+
+        async for message in channel.history(limit=50):
+
+            # Bot自身のメッセージだけを見る
+            if message.author.id != self.bot.user.id:
+                continue
+
+            if message.content.startswith(
+                CONFIG_MESSAGE_MARKER
+            ):
+                return message
+
+        return None
+
+    # ============================================================
+    # Load Config
+    # ============================================================
+
+    async def load_config(
+        self,
+        guild: discord.Guild
+    ) -> dict:
+
+        channel = await self.get_config_channel(
+            guild
+        )
+
+        message = await self.get_config_message(
+            channel
+        )
+
+        # 初回
+        if message is None:
+
+            config = {
+                "admin_roles": []
+            }
+
+            await self.save_config(
+                guild,
+                channel,
+                config
+            )
+
+            return config
 
         try:
-            # コピー元の権限設定
-            overwrites = source.overwrites
 
-            # コピー先の既存権限を削除
-            for target_obj in list(target.overwrites):
+            # BOT_CONFIG以降を取得
+            json_data = message.content[
+                len(CONFIG_MESSAGE_MARKER):
+            ].strip()
 
-                await target.set_permissions(
-                    target_obj,
-                    overwrite=None,
-                    reason=(
-                        f"Permission sync from #{source.name}"
-                    )
+            # ```json と ``` を削除
+            if json_data.startswith("```json"):
+                json_data = json_data[7:]
+
+            if json_data.endswith("```"):
+                json_data = json_data[:-3]
+
+            json_data = json_data.strip()
+
+            return json.loads(json_data)
+
+        except (json.JSONDecodeError, ValueError):
+
+            # 壊れていた場合は初期化
+            config = {
+                "admin_roles": []
+            }
+
+            await self.save_config(
+                guild,
+                channel,
+                config
+            )
+
+            return config
+
+    # ============================================================
+    # Save Config
+    # ============================================================
+
+    async def save_config(
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        config: dict
+    ):
+
+        content = (
+            f"{CONFIG_MESSAGE_MARKER}\n"
+            f"```json\n"
+            f"{json.dumps("
+            f"config, "
+            f"ensure_ascii=False, "
+            f"indent=2"
+            f")}\n"
+            f"```"
+        )
+
+        message = await self.get_config_message(
+            channel
+        )
+
+        if message is None:
+
+            await channel.send(
+                content
+            )
+
+        else:
+
+            await message.edit(
+                content=content
+            )
+
+    # ============================================================
+    # /permission add
+    # ============================================================
+
+    @permission.command(
+        name="add",
+        description="Adminランクにロールを追加します"
+    )
+    @app_commands.describe(
+        role="Adminランクに追加するロール"
+    )
+    async def permission_add(
+        self,
+        interaction: discord.Interaction,
+        role: discord.Role
+    ):
+
+        config = await self.load_config(
+            interaction.guild
+        )
+
+        admin_roles = config.setdefault(
+            "admin_roles",
+            []
+        )
+
+        # 既に登録済み
+        if role.id in admin_roles:
+
+            await interaction.response.send_message(
+                f"⚠️ {role.mention} は"
+                f"既にAdminランクです。",
+                ephemeral=True
+            )
+
+            return
+
+        # 追加
+        admin_roles.append(
+            role.id
+        )
+
+        channel = await self.get_config_channel(
+            interaction.guild
+        )
+
+        await self.save_config(
+            interaction.guild,
+            channel,
+            config
+        )
+
+        await interaction.response.send_message(
+            f"✅ {role.mention} を"
+            f"Adminランクに追加しました。",
+            ephemeral=True
+        )
+
+    # ============================================================
+    # /permission remove
+    # ============================================================
+
+    @permission.command(
+        name="remove",
+        description="Adminランクからロールを削除します"
+    )
+    @app_commands.describe(
+        role="Adminランクから削除するロール"
+    )
+    async def permission_remove(
+        self,
+        interaction: discord.Interaction,
+        role: discord.Role
+    ):
+
+        config = await self.load_config(
+            interaction.guild
+        )
+
+        admin_roles = config.setdefault(
+            "admin_roles",
+            []
+        )
+
+        # 登録されていない
+        if role.id not in admin_roles:
+
+            await interaction.response.send_message(
+                f"⚠️ {role.mention} は"
+                f"Adminランクではありません。",
+                ephemeral=True
+            )
+
+            return
+
+        # 削除
+        admin_roles.remove(
+            role.id
+        )
+
+        channel = await self.get_config_channel(
+            interaction.guild
+        )
+
+        await self.save_config(
+            interaction.guild,
+            channel,
+            config
+        )
+
+        await interaction.response.send_message(
+            f"✅ {role.mention} を"
+            f"Adminランクから削除しました。",
+            ephemeral=True
+        )
+
+    # ============================================================
+    # /permission list
+    # ============================================================
+
+    @permission.command(
+        name="list",
+        description="Adminランクのロール一覧を表示します"
+    )
+    async def permission_list(
+        self,
+        interaction: discord.Interaction
+    ):
+
+        config = await self.load_config(
+            interaction.guild
+        )
+
+        admin_roles = config.get(
+            "admin_roles",
+            []
+        )
+
+        # 空
+        if not admin_roles:
+
+            await interaction.response.send_message(
+                "📋 Adminランクに登録されている"
+                "ロールはありません。",
+                ephemeral=True
+            )
+
+            return
+
+        roles = []
+
+        for role_id in admin_roles:
+
+            role = interaction.guild.get_role(
+                role_id
+            )
+
+            if role is None:
+
+                roles.append(
+                    f"• `Unknown Role ({role_id})`"
                 )
 
-            # コピー元の権限をコピー
-            for target_obj, overwrite in overwrites.items():
+            else:
 
-                await target.set_permissions(
-                    target_obj,
-                    overwrite=overwrite,
-                    reason=(
-                        f"Permission sync from #{source.name}"
-                    )
+                roles.append(
+                    f"• {role.mention}"
                 )
 
-            await interaction.response.send_message(
-                f"✅ {source.mention} の権限を "
-                f"{target.mention} に同期しました。",
-                ephemeral=True
-            )
-
-        except discord.Forbidden:
-            await interaction.response.send_message(
-                "❌ チャンネルの権限を変更する権限がありません。",
-                ephemeral=True
-            )
-
-        except discord.HTTPException as e:
-            await interaction.response.send_message(
-                f"❌ Discord APIでエラーが発生しました。\n"
-                f"`{e}`",
-                ephemeral=True
-            )
+        await interaction.response.send_message(
+            "📋 **Adminランク**\n\n"
+            + "\n".join(roles),
+            ephemeral=True
+        )
 
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(
-        PermissionSync(bot)
+        PermissionManager(bot)
     )
