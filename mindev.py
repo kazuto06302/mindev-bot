@@ -31,30 +31,7 @@ bot = commands.Bot(
     intents=intents
 )
 
-
-#@bot.event
-#async def on_ready():
-#    print(
-#        f"Logged in as {bot.user.name} "
-#        f"(ID: {bot.user.id})",
-#        flush=True
-#    )
-#
-#    try:
-#        synced = await bot.tree.sync()
-#
-#        print(
-#            f"Synced {len(synced)} command(s)",
-#            flush=True
-#        )
-#
-#    except Exception as e:
-#        print(
-#            f"Failed to sync commands: "
-#            f"{type(e).__name__}: {e}",
-#            flush=True
-#        )
-
+# global commandに変更する必要あり
 @bot.event
 async def on_ready():
     print(
@@ -66,6 +43,16 @@ async def on_ready():
     guild = discord.Object(id=TEST_GUILD_ID)
 
     try:
+        # 古いグローバルコマンドを削除
+        bot.tree.clear_commands(guild=None)
+        await bot.tree.sync()
+
+        print(
+            "Cleared global commands.",
+            flush=True
+        )
+
+        # 現在読み込まれているコマンドをGuildへコピー
         bot.tree.copy_global_to(guild=guild)
 
         synced = await bot.tree.sync(
@@ -90,7 +77,6 @@ async def on_ready():
             f"{type(e).__name__}: {e}",
             flush=True
         )
-
 
 async def main():
 
