@@ -58,41 +58,59 @@ async def main():
 
     print("=== BEFORE LOAD ===", flush=True)
 
-    print("Loading cogs.ping...", flush=True)
+    extensions = [
+        "cogs.ping",
+        "cogs.permission",
+    ]
 
-    try:
-        await asyncio.wait_for(
-            bot.load_extension("cogs.ping"),
-            timeout=10
-        )
+    for extension in extensions:
 
         print(
-            "cogs.ping loaded successfully",
+            f"Loading: {extension}",
             flush=True
         )
 
-    except asyncio.TimeoutError:
-        print(
-            "ERROR: cogs.ping load timed out!",
-            flush=True
-        )
-        raise
+        try:
+            await asyncio.wait_for(
+                bot.load_extension(extension),
+                timeout=10
+            )
 
-    except Exception as e:
-        print(
-            f"ERROR loading cogs.ping: "
-            f"{type(e).__name__}: {e}",
-            flush=True
-        )
-        raise
+            print(
+                f"{extension} loaded successfully",
+                flush=True
+            )
+
+        except asyncio.TimeoutError:
+            print(
+                f"ERROR: {extension} load timed out!",
+                flush=True
+            )
+            raise
+
+        except Exception as e:
+            print(
+                f"ERROR loading {extension}: "
+                f"{type(e).__name__}: {e}",
+                flush=True
+            )
+            raise
 
     print("=== COMMANDS ===", flush=True)
 
     for command in bot.tree.get_commands():
+
         print(
             f"/{command.name}",
             flush=True
         )
+
+        if hasattr(command, "commands"):
+            for subcommand in command.commands:
+                print(
+                    f"  /{command.name} {subcommand.name}",
+                    flush=True
+                )
 
     print("=== STARTING BOT ===", flush=True)
 
