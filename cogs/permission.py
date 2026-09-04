@@ -1,13 +1,13 @@
 import json
-import os
 
 import discord
 from discord.ext import commands
 from discord import app_commands
 
 
-DATA_DIR = "data"
-DATA_FILE = os.path.join(DATA_DIR, "permissions.json")
+CONFIG_CATEGORY_NAME = "Bot"
+CONFIG_CHANNEL_NAME = "mindev_bot_config_channel"
+CONFIG_MESSAGE_MARKER = "BOT_CONFIG"
 
 
 class PermissionManager(commands.Cog):
@@ -19,66 +19,221 @@ class PermissionManager(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-        os.makedirs(DATA_DIR, exist_ok=True)
+    # ============================================================
+    # Config channel
+    # ============================================================
 
-        if not os.path.exists(DATA_FILE):
-            self.save_data({
-                "admin_roles": []
-            })
+    async def get_config_channel(
+        self,
+        guild: discord.Guild
+    ) -> discord.TextChannel:
 
-    def load_data(self):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        # 既存のbot-configを探す
+        channel = discord.utils.get(
+            guild.text_channels,
+            name=CONFIG_CHANNEL_NAME
+        )
 
-    def save_data(self, data):
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(
-                data,
-                f,
-                ensure_ascii=False,
-                indent=4
+        if channel is not None:
+            return channel
+
+        # Botカテゴリを探す
+        category = discord.utils.get(
+            guild.categories,
+            name=CONFIG_CATEGORY_NAME
+        )
+
+        # なければ作成
+        if category is None:
+            category = await guild.create_category(
+                CONFIG_CATEGORY_NAME,
+                reason="Creating Bot configuration category"
             )
 
-    def is_admin(self, member: discord.Member) -> bool:
-        data = self.load_data()
+        # Botだけが見られるチャンネルを作成
+        bot_member = guild.me
 
-        admin_roles = data.get("admin_roles", [])
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(
+                view_channel=False
+            ),
+            bot_member: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_messages=True
+            )
+        }
+
+        channel = await guild.create_text_channel(
+            CONFIG_CHANNEL_NAME,
+            category=category,
+            overwrites=overwrites,
+            reason="Creating Bot configuration channel"
+        )
+
+        return channel
+
+    # ============================================================
+    # Config message
+    # ============================================================
+
+    async def get_config_message(
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel
+    ) -> discord.Message | None:
+
+        async for message in channel.history(limit=50):
+            if message.author.id != self.bot.user.id:
+                continue
+
+            if message.content.startswith(CONFIG_MESSAGE_MARKER):
+                return message
+
+        return None
+
+    # ============================================================
+    # Load config
+    # ============================================================
+
+    async def load_config(
+        self,
+        guild: discord.Guild
+    ) -> dict:
+
+        channel = await self.get_config_channel(guild)
+
+        message = await self.get_config_message(
+            guild,
+            channel
+        )
+
+        # 初回
+        if message is None:
+            config = {
+                "admin_roles": []
+            }
+
+            await self.save_config(
+                guild,
+                channel,
+                config
+            )
+
+            return config
+
+        try:
+            # マーカー以降をJSONとして読み込む
+            json_data = message.content[
+                len(CONFIG_MESSAGE_MARKER):
+            ].strip()
+
+            return json.loads(json_data)
+
+        except (json.JSONDecodeError, ValueError):
+            # 壊れていた場合は初期化
+            config = {
+                "admin_roles": []
+            }
+
+            await self.save_config(
+                guild,
+                channel,
+                config
+            )
+
+            return config
+
+    # ============================================================
+    # Save config
+    # ============================================================
+
+    async def save_config(
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        config: dict
+    ):
+
+        content = (
+            f"{CONFIG_MESSAGE_MARKER}\n"
+            f"```json\n"
+            f"{json.dumps(config, ensure_ascii=False, indent=2)}"
+            f"\n```"
+        )
+
+        message = await self.get_config_message(
+            guild,
+            channel
+        )
+
+        if message is None:
+            await channel.send(content)
+
+        else:
+            await message.edit(content=content)
+
+    # ============================================================
+    # Admin check
+    # ============================================================
+
+    async def is_admin(
+        self,
+        member: discord.Member
+    ) -> bool:
+
+        # Discord管理者は常に許可
+        if member.guild_permissions.administrator:
+            return True
+
+        config = await self.load_config(member.guild)
+
+        admin_roles = config.get(
+            "admin_roles",
+            []
+        )
 
         return any(
             role.id in admin_roles
             for role in member.roles
         )
 
-    # =========================
+    # ============================================================
     # /permission add
-    # =========================
+    # ============================================================
 
     @permission.command(
         name="add",
         description="Adminランクにロールを追加します"
     )
     @app_commands.describe(
-        role="Adminランクを付与するロール"
+        role="Adminランクに追加するロール"
     )
     async def permission_add(
         self,
         interaction: discord.Interaction,
         role: discord.Role
     ):
+
         if not isinstance(interaction.user, discord.Member):
             return
 
-        # Discordの管理者は常に実行可能
-        if not interaction.user.guild_permissions.administrator:
-            if not self.is_admin(interaction.user):
-                await interaction.response.send_message(
-                    "❌ このコマンドを使用する権限がありません。",
-                    ephemeral=True
-                )
-                return
+        if not await self.is_admin(interaction.user):
+            await interaction.response.send_message(
+                "❌ このコマンドを使用する権限がありません。",
+                ephemeral=True
+            )
+            return
 
-        data = self.load_data()
-        admin_roles = data.setdefault("admin_roles", [])
+        config = await self.load_config(
+            interaction.guild
+        )
+
+        admin_roles = config.setdefault(
+            "admin_roles",
+            []
+        )
 
         if role.id in admin_roles:
             await interaction.response.send_message(
@@ -88,16 +243,25 @@ class PermissionManager(commands.Cog):
             return
 
         admin_roles.append(role.id)
-        self.save_data(data)
+
+        channel = await self.get_config_channel(
+            interaction.guild
+        )
+
+        await self.save_config(
+            interaction.guild,
+            channel,
+            config
+        )
 
         await interaction.response.send_message(
             f"✅ {role.mention} をAdminランクに追加しました。",
             ephemeral=True
         )
 
-    # =========================
+    # ============================================================
     # /permission remove
-    # =========================
+    # ============================================================
 
     @permission.command(
         name="remove",
@@ -111,19 +275,25 @@ class PermissionManager(commands.Cog):
         interaction: discord.Interaction,
         role: discord.Role
     ):
+
         if not isinstance(interaction.user, discord.Member):
             return
 
-        if not interaction.user.guild_permissions.administrator:
-            if not self.is_admin(interaction.user):
-                await interaction.response.send_message(
-                    "❌ このコマンドを使用する権限がありません。",
-                    ephemeral=True
-                )
-                return
+        if not await self.is_admin(interaction.user):
+            await interaction.response.send_message(
+                "❌ このコマンドを使用する権限がありません。",
+                ephemeral=True
+            )
+            return
 
-        data = self.load_data()
-        admin_roles = data.setdefault("admin_roles", [])
+        config = await self.load_config(
+            interaction.guild
+        )
+
+        admin_roles = config.setdefault(
+            "admin_roles",
+            []
+        )
 
         if role.id not in admin_roles:
             await interaction.response.send_message(
@@ -133,16 +303,25 @@ class PermissionManager(commands.Cog):
             return
 
         admin_roles.remove(role.id)
-        self.save_data(data)
+
+        channel = await self.get_config_channel(
+            interaction.guild
+        )
+
+        await self.save_config(
+            interaction.guild,
+            channel,
+            config
+        )
 
         await interaction.response.send_message(
             f"✅ {role.mention} をAdminランクから削除しました。",
             ephemeral=True
         )
 
-    # =========================
+    # ============================================================
     # /permission list
-    # =========================
+    # ============================================================
 
     @permission.command(
         name="list",
@@ -152,19 +331,25 @@ class PermissionManager(commands.Cog):
         self,
         interaction: discord.Interaction
     ):
+
         if not isinstance(interaction.user, discord.Member):
             return
 
-        if not interaction.user.guild_permissions.administrator:
-            if not self.is_admin(interaction.user):
-                await interaction.response.send_message(
-                    "❌ このコマンドを使用する権限がありません。",
-                    ephemeral=True
-                )
-                return
+        if not await self.is_admin(interaction.user):
+            await interaction.response.send_message(
+                "❌ このコマンドを使用する権限がありません。",
+                ephemeral=True
+            )
+            return
 
-        data = self.load_data()
-        admin_roles = data.get("admin_roles", [])
+        config = await self.load_config(
+            interaction.guild
+        )
+
+        admin_roles = config.get(
+            "admin_roles",
+            []
+        )
 
         if not admin_roles:
             await interaction.response.send_message(
@@ -178,14 +363,18 @@ class PermissionManager(commands.Cog):
         for role_id in admin_roles:
             role = interaction.guild.get_role(role_id)
 
-            if role is not None:
-                roles.append(role.mention)
+            if role is None:
+                roles.append(
+                    f"• `Unknown Role ({role_id})`"
+                )
             else:
-                roles.append(f"`Unknown Role ({role_id})`")
+                roles.append(
+                    f"• {role.mention}"
+                )
 
         await interaction.response.send_message(
             "📋 **Adminランク**\n\n" +
-            "\n".join(f"• {role}" for role in roles),
+            "\n".join(roles),
             ephemeral=True
         )
 
