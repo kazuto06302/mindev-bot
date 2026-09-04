@@ -40,44 +40,21 @@ async def on_ready():
         flush=True
     )
 
-    guild = discord.Object(id=TEST_GUILD_ID)
-
-    try:
-        bot.tree.copy_global_to(guild=guild)
-
-        synced = await bot.tree.sync(
-            guild=guild
-        )
-
-        print(
-            f"Synced {len(synced)} command(s) "
-            f"to guild {TEST_GUILD_ID}",
-            flush=True
-        )
-
-        for command in synced:
-            print(
-                f"  /{command.name}",
-                flush=True
-            )
-
-    except Exception as e:
-        print(
-            f"Failed to sync commands: "
-            f"{type(e).__name__}: {e}",
-            flush=True
-        )
-
-async def main():
-
     print("Clearing global commands...", flush=True)
 
     bot.tree.clear_commands(guild=None)
 
-    await bot.tree.sync()
+    synced = await bot.tree.sync()
 
-    print("Global commands cleared.", flush=True)
+    print(
+        f"Global commands cleared. "
+        f"Synced {len(synced)} command(s).",
+        flush=True
+    )
 
+    await bot.close()
+
+async def main():
     await bot.start(
         os.getenv("DISCORD_TOKEN")
     )
