@@ -2,18 +2,16 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
-from .permission import PermissionManager
-
 
 class PermissionSync(commands.Cog):
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def is_admin(self, member: discord.Member) -> bool:
-        """
-        BotのAdminランクに登録されているロールを
-        ユーザーが持っているか確認する。
-        """
+    async def is_admin(
+        self,
+        member: discord.Member
+    ) -> bool:
 
         permission_manager = self.bot.get_cog(
             "PermissionManager"
@@ -38,7 +36,7 @@ class PermissionSync(commands.Cog):
         target: discord.abc.GuildChannel,
         source: discord.abc.GuildChannel
     ):
-        # DMでは使用不可
+
         if interaction.guild is None:
             await interaction.response.send_message(
                 "❌ このコマンドはサーバー内でのみ使用できます。",
@@ -46,23 +44,22 @@ class PermissionSync(commands.Cog):
             )
             return
 
-        # Memberか確認
-        if not isinstance(interaction.user, discord.Member):
-            await interaction.response.send_message(
-                "❌ ユーザー情報を取得できませんでした。",
-                ephemeral=True
-            )
+        if not isinstance(
+            interaction.user,
+            discord.Member
+        ):
             return
 
-        # Adminランク確認
-        if not await self.is_admin(interaction.user):
+        # Adminランクチェック
+        if not await self.is_admin(
+            interaction.user
+        ):
             await interaction.response.send_message(
                 "❌ このコマンドを使用する権限がありません。",
                 ephemeral=True
             )
             return
 
-        # 同じサーバーか確認
         if target.guild.id != interaction.guild.id:
             await interaction.response.send_message(
                 "❌ コピー先チャンネルがこのサーバーにありません。",
@@ -77,7 +74,6 @@ class PermissionSync(commands.Cog):
             )
             return
 
-        # 同じチャンネルは禁止
         if target.id == source.id:
             await interaction.response.send_message(
                 "❌ コピー元とコピー先を同じチャンネルにはできません。",
@@ -85,12 +81,11 @@ class PermissionSync(commands.Cog):
             )
             return
 
-        # Bot権限確認
         bot_member = interaction.guild.me
 
         if bot_member is None:
             await interaction.response.send_message(
-                "❌ Botのメンバー情報を取得できませんでした。",
+                "❌ Botの情報を取得できませんでした。",
                 ephemeral=True
             )
             return
@@ -103,28 +98,30 @@ class PermissionSync(commands.Cog):
             return
 
         try:
-            # コピー元の権限設定
+
             overwrites = source.overwrites
 
             # コピー先の既存権限を削除
-            for target_obj in list(target.overwrites):
-
+            for target_obj in list(
+                target.overwrites
+            ):
                 await target.set_permissions(
                     target_obj,
                     overwrite=None,
                     reason=(
-                        f"Permission sync from #{source.name}"
+                        f"Permission sync "
+                        f"from #{source.name}"
                     )
                 )
 
             # コピー元の権限をコピー
             for target_obj, overwrite in overwrites.items():
-
                 await target.set_permissions(
                     target_obj,
                     overwrite=overwrite,
                     reason=(
-                        f"Permission sync from #{source.name}"
+                        f"Permission sync "
+                        f"from #{source.name}"
                     )
                 )
 
@@ -135,12 +132,14 @@ class PermissionSync(commands.Cog):
             )
 
         except discord.Forbidden:
+
             await interaction.response.send_message(
                 "❌ チャンネルの権限を変更する権限がありません。",
                 ephemeral=True
             )
 
         except discord.HTTPException as e:
+
             await interaction.response.send_message(
                 f"❌ Discord APIでエラーが発生しました。\n"
                 f"`{e}`",
