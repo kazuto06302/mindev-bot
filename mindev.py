@@ -1,6 +1,7 @@
 import os
 import discord
 from discord.ext import commands
+import asyncio
 
 # web server
 from threading import Thread
@@ -33,18 +34,20 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to sync commands: {e}")
 
-
 async def load_extensions():
-    await bot.load_extension("cogs.ping")
-    await bot.load_extension("cogs.permission_sync")
+    for filename in os.listdir("cogs"):
+        if filename.endswith(".py") and filename != "__init__.py":
+            extension = f"cogs.{filename[:-3]}"
 
+            try:
+                await bot.load_extension(extension)
+                print(f"Loaded: {extension}")
+            except Exception as e:
+                print(f"Failed to load {extension}: {e}")
 
 async def main():
     async with bot:
         await load_extensions()
         await bot.start(os.getenv("DISCORD_TOKEN"))
-
-
-import asyncio
 
 asyncio.run(main())
