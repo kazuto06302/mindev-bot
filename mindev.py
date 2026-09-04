@@ -36,14 +36,22 @@ async def on_ready():
 
 async def load_extensions():
     for filename in os.listdir("cogs"):
-        if filename.endswith(".py") and filename != "__init__.py":
-            extension = f"cogs.{filename[:-3]}"
+        if not filename.endswith(".py"):
+            continue
 
-            try:
-                await bot.load_extension(extension)
-                print(f"Loaded: {extension}")
-            except Exception as e:
-                print(f"Failed to load {extension}: {e}")
+        if filename == "__init__.py":
+            continue
+
+        extension = f"cogs.{filename[:-3]}"
+
+        try:
+            await bot.load_extension(extension)
+            print(f"Loaded: {extension}")
+
+        except Exception:
+            print(f"Failed to load {extension}:")
+            import traceback
+            traceback.print_exc()
 
 async def main():
     async with bot:
