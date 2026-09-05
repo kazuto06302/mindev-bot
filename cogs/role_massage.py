@@ -1,0 +1,890 @@
+import discord
+from discord.ext import commands
+from discord import app_commands
+
+
+class RoleMessage(commands.Cog):
+
+    rolemessage = app_commands.Group(
+        name="rolemessage",
+        description="リアクションでロールを付与するメッセージを管理します"
+    )
+
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    # ============================================================
+    # PermissionManager
+    # ============================================================
+
+    async def is_admin(
+        self,
+        member: discord.Member
+    ) -> bool:
+
+        permission_manager = self.bot.get_cog(
+            "PermissionManager"
+        )
+
+        if permission_manager is None:
+            return False
+
+        return await permission_manager.is_admin(member)
+
+    # ============================================================
+    # Config
+    # ============================================================
+
+    async def get_config(
+        self,
+        guild: discord.Guild
+    ) -> dict:
+
+        permission_manager = self.bot.get_cog(
+            "PermissionManager"
+        )
+
+        if permission_manager is None:
+            raise RuntimeError(
+                "PermissionManager is not loaded."
+            )
+
+        return await permission_manager.load_config(
+            guild
+        )
+
+    async def save_config(
+        self,
+        guild: discord.Guild,
+        config: dict
+    ):
+
+        permission_manager = self.bot.get_cog(
+            "PermissionManager"
+        )
+
+        if permission_manager is None:
+            raise RuntimeError(
+                "PermissionManager is not loaded."
+            )
+
+        channel = await permission_manager.get_config_channel(
+            guild
+        )
+
+        await permission_manager.save_config(
+            guild,
+            channel,
+            config
+        )
+
+    # ============================================================
+    # Find Role Message
+    # ============================================================
+
+    def find_role_message(
+        self,
+        config: dict,
+        message_id: int
+    ):
+        role_messages = config.get(
+            "role_messages",
+            []
+        )
+
+        for role_message in role_messages:
+
+            if role_message.get(
+                "message_id"
+            ) == message_id:
+
+                return role_message
+
+        return None
+
+    # ============================================================
+    # Find Emoji
+    # ============================================================
+
+    def find_emoji_role(
+        self,
+        role_message: dict,
+        emoji: str
+    ):
+        for role_data in role_message.get(
+            "roles",
+            []
+        ):
+
+            if role_data.get(
+                "emoji"
+            ) == emoji:
+
+                return role_data
+
+        return None
+
+    # ============================================================
+    # /rolemessage add
+    # ============================================================
+
+    @rolemessage.command(
+        name="add",
+        description="リアクションとロールの組み合わせを追加します"
+    )
+    @app_commands.describe(
+        message_id="対象メッセージのID",
+        emoji="使用する絵文字",
+        role="リアクション時に付与するロール"
+    )
+    async def rolemessage_add(
+        self,
+        interaction: discord.Interaction,
+        message_id: str,
+        emoji: str,
+        role: discord.Role
+    ):
+
+        # --------------------------------------------------------
+        # Guild check
+        # --------------------------------------------------------
+
+        if interaction.guild is None:
+
+            await interaction.response.send_message(
+                "❌ このコマンドはサーバー内でのみ使用できます。",
+                ephemeral=True
+            )
+
+            return
+
+        # --------------------------------------------------------
+        # Admin check
+        # --------------------------------------------------------
+
+        if not isinstance(
+            interaction.user,
+            discord.Member
+        ):
+
+            await interaction.response.send_message(
+                "❌ ユーザー情報を取得できませんでした。",
+                ephemeral=True
+            )
+
+            return
+
+        if not await self.is_admin(
+            interaction.user
+        ):
+
+            await interaction.response.send_message(
+                "❌ このコマンドを使用する権限がありません。",
+                ephemeral=True
+            )
+
+            return
+
+        # --------------------------------------------------------
+        # Message ID
+        # --------------------------------------------------------
+
+        try:
+
+            message_id_int = int(
+                message_id
+            )
+
+        except ValueError:
+
+            await interaction.response.send_message(
+                "❌ メッセージIDが正しくありません。",
+                ephemeral=True
+            )
+
+            return
+
+        # --------------------------------------------------------
+        # Emoji
+        # --------------------------------------------------------
+
+        emoji = emoji.strip()
+
+        if not emoji:
+
+            await interaction.response.send_message(
+                "❌ 絵文字を指定してください。",
+                ephemeral=True
+            )
+
+            return
+
+        # --------------------------------------------------------
+        # Role hierarchy
+        # --------------------------------------------------------
+
+        bot_member = interaction.guild.me
+
+        if bot_member is None:
+
+            await interaction.response.send_message(
+                "❌ Botの情報を取得できませんでした。",
+                ephemeral=True
+            )
+
+            return
+
+        if role.is_default():
+
+            await interaction.response.send_message(
+                "❌ @everyone ロールは指定できません。",
+                ephemeral=True
+            )
+
+            return
+
+        if role >= bot_member.top_role:
+
+            await interaction.response.send_message(
+                "❌ そのロールはBotの最高位ロール以下に配置してください。",
+                ephemeral=True
+            )
+
+            return
+
+        # --------------------------------------------------------
+        # Fetch message
+        # --------------------------------------------------------
+
+        try:
+
+            message = await interaction.channel.fetch_message(
+                message_id_int
+            )
+
+        except discord.NotFound:
+
+            await interaction.response.send_message(
+                "❌ 指定されたメッセージが見つかりません。",
+                ephemeral=True
+            )
+
+            return
+
+        except discord.Forbidden:
+
+            await interaction.response.send_message(
+                "❌ メッセージを取得する権限がありません。",
+                ephemeral=True
+            )
+
+            return
+
+        except discord.HTTPException as e:
+
+            await interaction.response.send_message(
+                f"❌ Discord APIでエラーが発生しました。\n"
+                f"`{e}`",
+                ephemeral=True
+            )
+
+            return
+
+        # --------------------------------------------------------
+        # Load config
+        # --------------------------------------------------------
+
+        try:
+
+            config = await self.get_config(
+                interaction.guild
+            )
+
+        except Exception as e:
+
+            await interaction.response.send_message(
+                f"❌ 設定の読み込みに失敗しました。\n"
+                f"`{e}`",
+                ephemeral=True
+            )
+
+            return
+
+        role_messages = config.setdefault(
+            "role_messages",
+            []
+        )
+
+        role_message = self.find_role_message(
+            config,
+            message.id
+        )
+
+        # --------------------------------------------------------
+        # Create role message
+        # --------------------------------------------------------
+
+        if role_message is None:
+
+            role_message = {
+                "message_id": message.id,
+                "roles": []
+            }
+
+            role_messages.append(
+                role_message
+            )
+
+        # --------------------------------------------------------
+        # Check duplicate emoji
+        # --------------------------------------------------------
+
+        if self.find_emoji_role(
+            role_message,
+            emoji
+        ) is not None:
+
+            await interaction.response.send_message(
+                f"⚠️ {emoji} は既にこのメッセージに登録されています。",
+                ephemeral=True
+            )
+
+            return
+
+        # --------------------------------------------------------
+        # Add configuration
+        # --------------------------------------------------------
+
+        role_message["roles"].append(
+            {
+                "emoji": emoji,
+                "role_id": role.id
+            }
+        )
+
+        # --------------------------------------------------------
+        # Add reaction
+        # --------------------------------------------------------
+
+        try:
+
+            await message.add_reaction(
+                emoji
+            )
+
+        except discord.NotFound:
+
+            # 既にリアクションできない場合は
+            # 設定を追加しない
+            role_message["roles"].pop()
+
+            await interaction.response.send_message(
+                "❌ 指定された絵文字をメッセージに追加できませんでした。",
+                ephemeral=True
+            )
+
+            return
+
+        except discord.Forbidden:
+
+            role_message["roles"].pop()
+
+            await interaction.response.send_message(
+                "❌ Botにリアクションを追加する権限がありません。",
+                ephemeral=True
+            )
+
+            return
+
+        except discord.HTTPException as e:
+
+            role_message["roles"].pop()
+
+            await interaction.response.send_message(
+                f"❌ リアクションの追加に失敗しました。\n"
+                f"`{e}`",
+                ephemeral=True
+            )
+
+            return
+
+        # --------------------------------------------------------
+        # Save config
+        # --------------------------------------------------------
+
+        try:
+
+            await self.save_config(
+                interaction.guild,
+                config
+            )
+
+        except Exception as e:
+
+            # Config保存に失敗した場合、
+            # 追加した設定を戻す
+            role_message["roles"].pop()
+
+            await interaction.response.send_message(
+                f"❌ 設定の保存に失敗しました。\n"
+                f"`{e}`",
+                ephemeral=True
+            )
+
+            return
+
+        # --------------------------------------------------------
+        # Response
+        # --------------------------------------------------------
+
+        await interaction.response.send_message(
+            f"✅ {emoji} → {role.mention} を登録しました。\n"
+            f"メッセージID: `{message.id}`",
+            ephemeral=True
+        )
+
+    # ============================================================
+    # /rolemessage remove
+    # ============================================================
+
+    @rolemessage.command(
+        name="remove",
+        description="リアクションとロールの組み合わせを削除します"
+    )
+    @app_commands.describe(
+        message_id="対象メッセージのID",
+        emoji="削除する絵文字"
+    )
+    async def rolemessage_remove(
+        self,
+        interaction: discord.Interaction,
+        message_id: str,
+        emoji: str
+    ):
+
+        if interaction.guild is None:
+
+            await interaction.response.send_message(
+                "❌ このコマンドはサーバー内でのみ使用できます。",
+                ephemeral=True
+            )
+
+            return
+
+        if not isinstance(
+            interaction.user,
+            discord.Member
+        ):
+
+            return
+
+        if not await self.is_admin(
+            interaction.user
+        ):
+
+            await interaction.response.send_message(
+                "❌ このコマンドを使用する権限がありません。",
+                ephemeral=True
+            )
+
+            return
+
+        try:
+
+            message_id_int = int(
+                message_id
+            )
+
+        except ValueError:
+
+            await interaction.response.send_message(
+                "❌ メッセージIDが正しくありません。",
+                ephemeral=True
+            )
+
+            return
+
+        emoji = emoji.strip()
+
+        config = await self.get_config(
+            interaction.guild
+        )
+
+        role_message = self.find_role_message(
+            config,
+            message_id_int
+        )
+
+        if role_message is None:
+
+            await interaction.response.send_message(
+                "❌ そのメッセージはRole Messageとして登録されていません。",
+                ephemeral=True
+            )
+
+            return
+
+        role_data = self.find_emoji_role(
+            role_message,
+            emoji
+        )
+
+        if role_data is None:
+
+            await interaction.response.send_message(
+                f"❌ {emoji} は登録されていません。",
+                ephemeral=True
+            )
+
+            return
+
+        role_message["roles"].remove(
+            role_data
+        )
+
+        # --------------------------------------------------------
+        # Remove bot's reaction
+        # --------------------------------------------------------
+
+        try:
+
+            message = await interaction.channel.fetch_message(
+                message_id_int
+            )
+
+            await message.clear_reaction(
+                emoji
+            )
+
+        except (
+            discord.NotFound,
+            discord.Forbidden,
+            discord.HTTPException
+        ):
+            # リアクション削除に失敗しても
+            # Configからは削除する
+            pass
+
+        # --------------------------------------------------------
+        # Remove empty message entry
+        # --------------------------------------------------------
+
+        if not role_message["roles"]:
+
+            config["role_messages"].remove(
+                role_message
+            )
+
+        await self.save_config(
+            interaction.guild,
+            config
+        )
+
+        await interaction.response.send_message(
+            f"✅ {emoji} のRole Message設定を削除しました。",
+            ephemeral=True
+        )
+
+    # ============================================================
+    # /rolemessage list
+    # ============================================================
+
+    @rolemessage.command(
+        name="list",
+        description="Role Messageの設定を表示します"
+    )
+    @app_commands.describe(
+        message_id="対象メッセージのID"
+    )
+    async def rolemessage_list(
+        self,
+        interaction: discord.Interaction,
+        message_id: str
+    ):
+
+        if interaction.guild is None:
+
+            await interaction.response.send_message(
+                "❌ このコマンドはサーバー内でのみ使用できます。",
+                ephemeral=True
+            )
+
+            return
+
+        if not isinstance(
+            interaction.user,
+            discord.Member
+        ):
+
+            return
+
+        if not await self.is_admin(
+            interaction.user
+        ):
+
+            await interaction.response.send_message(
+                "❌ このコマンドを使用する権限がありません。",
+                ephemeral=True
+            )
+
+            return
+
+        try:
+
+            message_id_int = int(
+                message_id
+            )
+
+        except ValueError:
+
+            await interaction.response.send_message(
+                "❌ メッセージIDが正しくありません。",
+                ephemeral=True
+            )
+
+            return
+
+        config = await self.get_config(
+            interaction.guild
+        )
+
+        role_message = self.find_role_message(
+            config,
+            message_id_int
+        )
+
+        if role_message is None:
+
+            await interaction.response.send_message(
+                "📋 このメッセージにはRole Message設定がありません。",
+                ephemeral=True
+            )
+
+            return
+
+        lines = []
+
+        for role_data in role_message.get(
+            "roles",
+            []
+        ):
+
+            emoji = role_data.get(
+                "emoji",
+                "?"
+            )
+
+            role_id = role_data.get(
+                "role_id"
+            )
+
+            role = interaction.guild.get_role(
+                role_id
+            )
+
+            if role is None:
+
+                role_text = (
+                    f"`Unknown Role ({role_id})`"
+                )
+
+            else:
+
+                role_text = role.mention
+
+            lines.append(
+                f"{emoji} → {role_text}"
+            )
+
+        await interaction.response.send_message(
+            f"📋 **Role Message**\n"
+            f"メッセージID: `{message_id_int}`\n\n"
+            + "\n".join(lines),
+            ephemeral=True
+        )
+
+    # ============================================================
+    # Reaction Add
+    # ============================================================
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(
+        self,
+        payload: discord.RawReactionActionEvent
+    ):
+
+        if payload.guild_id is None:
+            return
+
+        if self.bot.user is not None:
+            if payload.user_id == self.bot.user.id:
+                return
+
+        guild = self.bot.get_guild(
+            payload.guild_id
+        )
+
+        if guild is None:
+            return
+
+        member = guild.get_member(
+            payload.user_id
+        )
+
+        if member is None:
+
+            try:
+                member = await guild.fetch_member(
+                    payload.user_id
+                )
+
+            except (
+                discord.NotFound,
+                discord.Forbidden,
+                discord.HTTPException
+            ):
+                return
+
+        config = await self.get_config(
+            guild
+        )
+
+        role_message = self.find_role_message(
+            config,
+            payload.message_id
+        )
+
+        if role_message is None:
+            return
+
+        emoji = str(
+            payload.emoji
+        )
+
+        role_data = self.find_emoji_role(
+            role_message,
+            emoji
+        )
+
+        if role_data is None:
+            return
+
+        role_id = role_data.get(
+            "role_id"
+        )
+
+        role = guild.get_role(
+            role_id
+        )
+
+        if role is None:
+            return
+
+        try:
+
+            await member.add_roles(
+                role,
+                reason="Role Message reaction"
+            )
+
+        except (
+            discord.Forbidden,
+            discord.HTTPException
+        ):
+            pass
+
+    # ============================================================
+    # Reaction Remove
+    # ============================================================
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_remove(
+        self,
+        payload: discord.RawReactionActionEvent
+    ):
+
+        if payload.guild_id is None:
+            return
+
+        if self.bot.user is not None:
+            if payload.user_id == self.bot.user.id:
+                return
+
+        guild = self.bot.get_guild(
+            payload.guild_id
+        )
+
+        if guild is None:
+            return
+
+        member = guild.get_member(
+            payload.user_id
+        )
+
+        if member is None:
+
+            try:
+                member = await guild.fetch_member(
+                    payload.user_id
+                )
+
+            except (
+                discord.NotFound,
+                discord.Forbidden,
+                discord.HTTPException
+            ):
+                return
+
+        config = await self.get_config(
+            guild
+        )
+
+        role_message = self.find_role_message(
+            config,
+            payload.message_id
+        )
+
+        if role_message is None:
+            return
+
+        emoji = str(
+            payload.emoji
+        )
+
+        role_data = self.find_emoji_role(
+            role_message,
+            emoji
+        )
+
+        if role_data is None:
+            return
+
+        role_id = role_data.get(
+            "role_id"
+        )
+
+        role = guild.get_role(
+            role_id
+        )
+
+        if role is None:
+            return
+
+        try:
+
+            await member.remove_roles(
+                role,
+                reason="Role Message reaction"
+            )
+
+        except (
+            discord.Forbidden,
+            discord.HTTPException
+        ):
+            pass
+
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(
+        RoleMessage(bot)
+    )
