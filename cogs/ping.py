@@ -8,7 +8,7 @@ class Ping(commands.Cog):
 
     @discord.app_commands.command(
         name="ping",
-        description='Returns "Ping!"'
+        description='"Ping!"とping数を返します'
     )
     async def ping(self, interaction: discord.Interaction):
         latency = round(self.bot.latency * 1000)
