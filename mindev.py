@@ -74,6 +74,7 @@ async def main():
         "cogs.ping",
         "cogs.permission",
         "cogs.permission_sync",
+        "cogs.role_message"
     ]
 
     for extension in extensions:
