@@ -39,25 +39,90 @@ async def on_ready():
         flush=True
     )
 
-    print(
-        "Clearing global commands...",
-        flush=True
-    )
+    guild = discord.Object(id=TEST_GUILD_ID)
 
-    bot.tree.clear_commands(guild=None)
+    try:
+        bot.tree.copy_global_to(guild=guild)
 
-    synced = await bot.tree.sync()
+        synced = await bot.tree.sync(
+            guild=guild
+        )
 
-    print(
-        f"Global commands cleared. "
-        f"Synced {len(synced)} command(s).",
-        flush=True
-    )
+        print(
+            f"Synced {len(synced)} command(s) "
+            f"to guild {TEST_GUILD_ID}",
+            flush=True
+        )
 
-    await bot.close()
+        for command in synced:
+            print(
+                f"  /{command.name}",
+                flush=True
+            )
+
+    except Exception as e:
+        print(
+            f"Failed to sync commands: "
+            f"{type(e).__name__}: {e}",
+            flush=True
+        )
 
 
 async def main():
+
+    extensions = [
+        "cogs.ping",
+        "cogs.permission",
+        "cogs.permission_sync",
+    ]
+
+    for extension in extensions:
+        print(
+            f"Loading: {extension}",
+            flush=True
+        )
+
+        try:
+            await asyncio.wait_for(
+                bot.load_extension(extension),
+                timeout=10
+            )
+
+            print(
+                f"{extension} loaded successfully",
+                flush=True
+            )
+
+        except asyncio.TimeoutError:
+            print(
+                f"ERROR: {extension} load timed out!",
+                flush=True
+            )
+            raise
+
+        except Exception as e:
+            print(
+                f"ERROR loading {extension}: "
+                f"{type(e).__name__}: {e}",
+                flush=True
+            )
+            raise
+
+    print("=== COMMANDS ===", flush=True)
+
+    for command in bot.tree.get_commands():
+        print(
+            f"/{command.name}",
+            flush=True
+        )
+
+        if hasattr(command, "commands"):
+            for subcommand in command.commands:
+                print(
+                    f"  /{command.name} {subcommand.name}",
+                    flush=True
+                )
+
     await bot.start(
         os.getenv("DISCORD_TOKEN")
     )
